@@ -1,0 +1,36 @@
+[project]
+name = "eartrainer"
+version = "0.1.0"
+description = "Interval trainer MVP"
+authors = [
+    {name = "Clay Cantrell",email = "77699867+claycantrell@users.noreply.github.com"}
+]
+readme = "README.md"
+requires-python = "^3.11"
+dependencies = [
+    "numpy (>=2.3.3,<3.0.0)",
+    "soundfile (>=0.13.1,<0.14.0)",
+    "streamlit (>=1.49.1,<2.0.0)",
+    "pydantic (>=2.11.9,<3.0.0)",
+    "tinydb (>=4.8.2,<5.0.0)",
+    "pytest (>=8.4.2,<9.0.0)",
+    "mypy (>=1.18.1,<2.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+strict_optional = true
+no_implicit_optional = true
+check_untyped_defs = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
