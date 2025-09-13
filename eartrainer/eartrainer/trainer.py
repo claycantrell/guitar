@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import random
 from collections import deque
-from typing import Deque, Dict, List, Tuple
+from typing import Deque, Dict, List, Tuple, Optional
 
 import numpy as np
 
@@ -62,14 +62,15 @@ def choose_interval(intervals: List[str], weights: List[float]) -> str:
 	return intervals[idx]
 
 
-def distractors(correct: str, k: int = 3) -> List[str]:
-	# Pick nearest semitone intervals to correct as distractors
-	names = interval_names()
-	names = [n for n in names if n != correct]
+def distractors(correct: str, pool: List[str], k: int = 3) -> List[str]:
+	# Restrict distractors to the selected pool
+	names = [n for n in pool if n != correct]
+	if not names:
+		return []
 	target = SEMITONES[correct]
 	names.sort(key=lambda n: abs(SEMITONES[n] - target))
-	candidates = names[: max(1, k + 2)]
-	# Occasionally insert a far distractor for variety
+	candidates = names[: max(1, min(k + 2, len(names)))]
+	# Occasionally insert a far distractor for variety, from within pool
 	if len(names) > 0 and random.random() < 0.2:
 		far = names[-1]
 		if far not in candidates:
@@ -77,18 +78,36 @@ def distractors(correct: str, k: int = 3) -> List[str]:
 	return random.sample(candidates, k=min(k, len(candidates)))
 
 
-def make_question(settings: Settings, state: AdaptiveState) -> Question:
+def make_question(settings: Settings, state: AdaptiveState, last_q: Optional[Question] = None) -> Question:
 	intervals = settings.intervals
 	w = state.weights(intervals)
-	name = choose_interval(intervals, w)
 	min_midi, max_midi = settings_range_to_midi(settings.range)
+	name = choose_interval(intervals, w)
 	root = pick_root_in_bounds(min_midi, max_midi, name, settings.mode)
+	# Avoid repeating exact same (interval, root, mode) as last
+	for _ in range(25):
+		if last_q is None or not (name == last_q.interval and root == last_q.root_midi and settings.mode == last_q.mode):
+			break
+		# Resample either root or interval
+		if random.random() < 0.7:
+			root = pick_root_in_bounds(min_midi, max_midi, name, settings.mode)
+		else:
+			name = choose_interval(intervals, w)
+	# As a last resort, nudge root within bounds if still identical
+	if last_q is not None and name == last_q.interval and root == last_q.root_midi and settings.mode == last_q.mode:
+		alt = root + 1
+		if alt <= max_midi:
+			root = alt
+		else:
+			alt2 = root - 1
+			if alt2 >= min_midi:
+				root = alt2
 	m1, m2 = interval_to_pair(root, name, settings.mode)
-	options = [name] + distractors(name, k=3)
-	random.shuffle(options)
+	opts = [name] + distractors(name, intervals, k=3)
+	random.shuffle(opts)
 	return Question(
 		interval=name,
-		options=options,
+		options=opts,
 		answer=name,
 		root_midi=root,
 		pair_midi=(m1, m2),

@@ -2,9 +2,10 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 from typing import Any, Dict
+import base64
 
 from eartrainer.audio import harmonic as synth_harmonic, melodic as synth_melodic, wav_bytes
-from eartrainer.models import AnswerRecord, Settings, Mode, Waveform
+from eartrainer.models import AnswerRecord, Settings, Mode, Waveform, Stats
 from eartrainer.storage import load_settings, load_stats, save_settings, save_stats
 from eartrainer.theory import midi_pair_to_freqs
 from eartrainer.trainer import AdaptiveState, make_question, score_answer
@@ -24,14 +25,23 @@ def get_state() -> Any:
 		st.session_state.adaptive.seed_from_stats(st.session_state.stats)
 	if "current_question" not in st.session_state:
 		st.session_state.current_question = None
-	if "replays_left" not in st.session_state:
-		st.session_state.replays_left = 3
+	# removed replays_left
 	if "seen" not in st.session_state:
 		st.session_state.seen = 0
 	if "correct" not in st.session_state:
 		st.session_state.correct = 0
 	if "history" not in st.session_state:
 		st.session_state.history = []
+	if "feedback" not in st.session_state:
+		st.session_state.feedback = None  # {"correct": bool, "text": str}
+	if "trigger_autoplay" not in st.session_state:
+		st.session_state.trigger_autoplay = False
+	if "play_version" not in st.session_state:
+		st.session_state.play_version = 0
+	if "clear_audio" not in st.session_state:
+		st.session_state.clear_audio = False
+	if "session_stats" not in st.session_state:
+		st.session_state.session_stats = Stats()
 	return st.session_state
 
 
@@ -57,7 +67,7 @@ def sidebar_controls(s: Settings) -> Settings:
 
 
 @st.cache_data(show_spinner=False)
-def _cached_audio_bytes(f1: float, f2: float, mode: str, waveform: str) -> bytes:
+def _cached_audio_bytes(f1: float, f2: float, mode: str, waveform: str, salt: int) -> bytes:
 	if mode == "harmonic":
 		x = synth_harmonic(f1, f2, dur=1.0, waveform=waveform)
 	else:
@@ -72,22 +82,40 @@ def main() -> None:
 
 	st.title("Interval Ear Trainer")
 
-	col1, col2 = st.columns([1,1])
-	with col1:
-		if st.button("Play", use_container_width=True):
-			state.current_question = make_question(state.settings, state.adaptive)
-			state.replays_left = 3
-	with col2:
-		disabled = state.current_question is None or state.replays_left <= 0
-		if st.button(f"Replay ({state.replays_left})", disabled=disabled, use_container_width=True):
-			state.replays_left = max(0, state.replays_left - 1)
+	# Next only
+	if st.button("Next", use_container_width=True):
+		state.current_question = make_question(state.settings, state.adaptive, state.current_question)
+		state.feedback = None
+		state.trigger_autoplay = True
+		state.play_version += 1
+
+	# Feedback indicator (green/red)
+	if state.feedback is not None:
+		if state.feedback.get("correct"):
+			st.success(state.feedback.get("text", "Correct!"))
+		else:
+			st.error(state.feedback.get("text", "Incorrect"))
 
 	# Playback if we have a question
 	if state.current_question is not None:
+		player = st.empty()
+		# Phase 1: clear any existing audio element, then schedule autoplay
+		if state.clear_audio:
+			player.empty()
+			state.clear_audio = False
+			state.trigger_autoplay = True
+			state.play_version += 1
+			st.rerun()
+
 		m1, m2 = state.current_question.pair_midi
 		f1, f2 = midi_pair_to_freqs(m1, m2)
-		bytes_ = _cached_audio_bytes(f1, f2, state.current_question.mode, state.settings.waveform)
-		st.audio(bytes_, format="audio/wav")
+		bytes_ = _cached_audio_bytes(f1, f2, state.current_question.mode, state.settings.waveform, state.play_version)
+		if state.trigger_autoplay:
+			player.empty()
+			player.audio(bytes_, format="audio/wav", autoplay=True)
+			state.trigger_autoplay = False
+		else:
+			player.audio(bytes_, format="audio/wav", autoplay=False)
 
 		st.subheader("Choose the interval")
 		btn_cols = st.columns(2)
@@ -105,38 +133,58 @@ def main() -> None:
 				state.correct += 1
 			state.history.append(record)
 			save_stats(state.stats)
+			# Update session-scoped stats (no adaptive update here)
+			if state.current_question.interval not in state.session_stats.by_interval:
+				from eartrainer.models import IntervalStats
+				state.session_stats.by_interval[state.current_question.interval] = IntervalStats()
+			state.session_stats.by_interval[state.current_question.interval].seen += 1
+			if record.correct:
+				state.session_stats.by_interval[state.current_question.interval].correct += 1
+			else:
+				conf = state.session_stats.confusion.setdefault(state.current_question.interval, {})
+				conf[clicked] = conf.get(clicked, 0) + 1
+			# Set feedback indicator (green/red)
+			if record.correct:
+				state.feedback = {"correct": True, "text": "Correct!"}
+				st.success("Correct!")
+			else:
+				msg = f"Incorrect — correct was {state.current_question.answer}"
+				state.feedback = {"correct": False, "text": msg}
+				st.error(msg)
 			if state.seen >= state.settings.session_len:
 				st.success("Session complete. See results below.")
 			else:
-				# Immediately prepare next question
-				state.current_question = make_question(state.settings, state.adaptive)
-				state.replays_left = 3
+				# Do not auto-advance or autoplay on answer; wait for Next
+				pass
 
 	# Score and end session
 	st.markdown("---")
 	st.write(f"Score: {state.correct} / {state.seen}")
 	if st.button("End Session"):
-		# Reset session counters but keep stats persisted
+		# Reset session counters and session-scoped results but keep persistent stats
 		state.current_question = None
-		state.replays_left = 3
 		state.seen = 0
 		state.correct = 0
 		state.history = []
+		state.feedback = None
+		state.trigger_autoplay = False
+		state.clear_audio = False
+		state.session_stats = Stats()
 
 	# Results table (simple for MVP)
-	if state.stats.by_interval:
+	if state.session_stats.by_interval:
 		st.subheader("Results by interval")
 		rows = []
-		for name, st_i in state.stats.by_interval.items():
+		for name, st_i in state.session_stats.by_interval.items():
 			acc = (st_i.correct / st_i.seen) if st_i.seen else 0.0
 			rows.append({"interval": name, "seen": st_i.seen, "correct": st_i.correct, "accuracy": round(acc, 3)})
 		st.dataframe(rows, hide_index=True)
 
-	if state.stats.confusion:
+	if state.session_stats.confusion:
 		st.subheader("Confusion heatmap")
 		# Flatten confusion dict to long-form DataFrame
 		data = []
-		for truth, d in state.stats.confusion.items():
+		for truth, d in state.session_stats.confusion.items():
 			for chosen, count in d.items():
 				data.append({"truth": truth, "chosen": chosen, "count": count})
 		df = pd.DataFrame(data)
