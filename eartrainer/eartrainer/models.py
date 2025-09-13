@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 
 Mode = Literal["ascending", "descending", "harmonic"]
-Waveform = Literal["sine", "triangle", "saw"]
+Waveform = Literal["sine", "triangle", "saw", "piano"]
 
 
 class Settings(BaseModel):

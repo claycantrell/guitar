@@ -9,6 +9,7 @@ from eartrainer.models import AnswerRecord, Settings, Mode, Waveform, Stats
 from eartrainer.storage import load_settings, load_stats, save_settings, save_stats
 from eartrainer.theory import midi_pair_to_freqs
 from eartrainer.trainer import AdaptiveState, make_question, score_answer
+from eartrainer.piano import is_piano_available, render_piano_bytes
 
 
 st.set_page_config(page_title="Ear Trainer", page_icon=None, layout="centered")
@@ -54,7 +55,13 @@ def sidebar_controls(s: Settings) -> Settings:
 	)
 	mode_str = st.sidebar.selectbox("Mode", ["ascending","descending","harmonic"], index=["ascending","descending","harmonic"].index(s.mode))
 	range_val = st.sidebar.select_slider("Range (root)", options=["C3","D3","E3","F3","G3","A3","B3","C4","D4","E4","F4","G4","A4"], value=s.range)
-	waveform_str = st.sidebar.selectbox("Waveform", ["sine","triangle","saw"], index=["sine","triangle","saw"].index(s.waveform))
+	wf_options = ["sine","triangle","saw"]
+	piano_ok = is_piano_available()
+	if piano_ok:
+		wf_options.append("piano")
+	else:
+		st.sidebar.info("Piano requires FluidSynth and an SF2. Install FluidSynth: brew install fluidsynth. Then set EARTRAINER_SF2_PATH to a .sf2.")
+	waveform_str = st.sidebar.selectbox("Waveform", wf_options, index=wf_options.index(s.waveform) if s.waveform in wf_options else 0)
 	session_len = st.sidebar.slider("Session length", min_value=5, max_value=100, value=s.session_len, step=1)
 	volume = st.sidebar.slider("Volume", min_value=0.0, max_value=1.0, value=s.volume, step=0.05)
 
@@ -109,7 +116,15 @@ def main() -> None:
 
 		m1, m2 = state.current_question.pair_midi
 		f1, f2 = midi_pair_to_freqs(m1, m2)
-		bytes_ = _cached_audio_bytes(f1, f2, state.current_question.mode, state.settings.waveform, state.play_version)
+		# Piano path bypasses cache to avoid caching external renderer quirks
+		if state.settings.waveform == "piano":
+			try:
+				bytes_ = render_piano_bytes(m1, m2, state.current_question.mode, state.settings.volume)
+			except Exception as e:
+				st.warning(str(e))
+				bytes_ = _cached_audio_bytes(f1, f2, state.current_question.mode, state.settings.waveform, state.play_version)
+		else:
+			bytes_ = _cached_audio_bytes(f1, f2, state.current_question.mode, state.settings.waveform, state.play_version)
 		if state.trigger_autoplay:
 			player.empty()
 			player.audio(bytes_, format="audio/wav", autoplay=True)
