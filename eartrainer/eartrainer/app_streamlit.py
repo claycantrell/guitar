@@ -48,29 +48,39 @@ def get_state() -> Any:
 
 def sidebar_controls(s: Settings) -> Settings:
 	st.sidebar.header("Settings")
-	intervals = st.sidebar.multiselect(
-		"Intervals",
-		options=["m2","M2","m3","M3","P4","TT","P5","m6","M6","m7","M7","P8"],
-		default=s.intervals,
-	)
-	mode_str = st.sidebar.selectbox("Mode", ["ascending","descending","harmonic"], index=["ascending","descending","harmonic"].index(s.mode))
-	range_val = st.sidebar.select_slider("Range (root)", options=["C3","D3","E3","F3","G3","A3","B3","C4","D4","E4","F4","G4","A4"], value=s.range)
-	wf_options = ["sine","triangle","saw"]
-	piano_ok = is_piano_available()
-	if piano_ok:
-		wf_options.append("piano")
-	else:
-		st.sidebar.info("Piano requires FluidSynth and an SF2. Install FluidSynth: brew install fluidsynth. Then set EARTRAINER_SF2_PATH to a .sf2.")
-	waveform_str = st.sidebar.selectbox("Waveform", wf_options, index=wf_options.index(s.waveform) if s.waveform in wf_options else 0)
-	session_len = st.sidebar.slider("Session length", min_value=5, max_value=100, value=s.session_len, step=1)
-	volume = st.sidebar.slider("Volume", min_value=0.0, max_value=1.0, value=s.volume, step=0.05)
-
-	mode: Mode = mode_str  # type: ignore[assignment]
-	waveform: Waveform = waveform_str  # type: ignore[assignment]
-	new_s = Settings(intervals=intervals or s.intervals, mode=mode, range=range_val, waveform=waveform, session_len=session_len, volume=volume)
-	if new_s != s:
-		save_settings(new_s)
-	return new_s
+	with st.sidebar.form("settings_form"):
+		all_intervals = ["m2","M2","m3","M3","P4","TT","P5","m6","M6","m7","M7","P8"]
+		prev = s.intervals if s.intervals else all_intervals
+		intervals = st.multiselect(
+			"Intervals",
+			options=all_intervals,
+			default=prev,
+			key="intervals_multiselect",
+		)
+		if not intervals:
+			intervals = prev
+		mode_str = st.selectbox("Mode", ["ascending","descending","harmonic"], index=["ascending","descending","harmonic"].index(s.mode))
+		range_val = st.select_slider("Range (root)", options=["C3","D3","E3","F3","G3","A3","B3","C4","D4","E4","F4","G4","A4"], value=s.range)
+		wf_options = ["sine","triangle","saw"]
+		piano_ok = is_piano_available()
+		if piano_ok:
+			wf_options.append("piano")
+		else:
+			st.info("Piano requires FluidSynth and an SF2. Install FluidSynth: brew install fluidsynth. Then set EARTRAINER_SF2_PATH to a .sf2.")
+		current_wf = s.waveform if s.waveform in wf_options else wf_options[0]
+		waveform_str = st.selectbox("Waveform", wf_options, index=wf_options.index(current_wf))
+		session_len = st.slider("Session length", min_value=5, max_value=100, value=s.session_len, step=1)
+		volume = st.slider("Volume", min_value=0.0, max_value=1.0, value=s.volume, step=0.05)
+		submitted = st.form_submit_button("Apply")
+		if not submitted:
+			return s
+		mode: Mode = mode_str  # type: ignore[assignment]
+		waveform: Waveform = waveform_str  # type: ignore[assignment]
+		candidate = Settings(intervals=intervals, mode=mode, range=range_val, waveform=waveform, session_len=session_len, volume=volume)
+		if candidate != s:
+			save_settings(candidate)
+			return candidate
+		return s
 
 
 @st.cache_data(show_spinner=False)
