@@ -9,7 +9,7 @@ from eartrainer.models import AnswerRecord, Settings, Mode, Waveform, Stats
 from eartrainer.storage import load_settings, load_stats, save_settings, save_stats
 from eartrainer.theory import midi_pair_to_freqs
 from eartrainer.trainer import AdaptiveState, make_question, score_answer
-from eartrainer.piano import is_piano_available, render_piano_bytes
+from eartrainer.piano import is_soundfont_available, render_instrument_bytes, render_piano_bytes
 
 
 st.set_page_config(page_title="Ear Trainer", page_icon=None, layout="centered")
@@ -61,14 +61,20 @@ def sidebar_controls(s: Settings) -> Settings:
 			intervals = prev
 		mode_str = st.selectbox("Mode", ["ascending","descending","harmonic"], index=["ascending","descending","harmonic"].index(s.mode))
 		range_val = st.select_slider("Range (root)", options=["C3","D3","E3","F3","G3","A3","B3","C4","D4","E4","F4","G4","A4"], value=s.range)
+		
+		# Build waveform options
 		wf_options = ["sine","triangle","saw"]
-		piano_ok = is_piano_available()
-		if piano_ok:
-			wf_options.append("piano")
-		else:
-			st.info("Piano requires FluidSynth and an SF2. Install FluidSynth: brew install fluidsynth. Then set EARTRAINER_SF2_PATH to a .sf2.")
+		try:
+			soundfont_ok = is_soundfont_available()
+			if soundfont_ok:
+				wf_options.extend(["piano", "acoustic_guitar", "electric_guitar_clean", "electric_guitar_jazz"])
+			else:
+				st.info("Instruments (piano, guitar) require FluidSynth and a soundfont. Install FluidSynth: brew install fluidsynth")
+		except Exception as e:
+			st.warning(f"Error checking soundfont availability: {e}")
+		
 		current_wf = s.waveform if s.waveform in wf_options else wf_options[0]
-		waveform_str = st.selectbox("Waveform", wf_options, index=wf_options.index(current_wf))
+		waveform_str = st.selectbox("Instrument/Waveform", wf_options, index=wf_options.index(current_wf))
 		session_len = st.slider("Session length", min_value=5, max_value=100, value=s.session_len, step=1)
 		volume = st.slider("Volume", min_value=0.0, max_value=1.0, value=s.volume, step=0.05)
 		submitted = st.form_submit_button("Apply")
@@ -126,13 +132,14 @@ def main() -> None:
 
 		m1, m2 = state.current_question.pair_midi
 		f1, f2 = midi_pair_to_freqs(m1, m2)
-		# Piano path bypasses cache to avoid caching external renderer quirks
-		if state.settings.waveform == "piano":
+		# Soundfont instruments bypass cache to avoid caching external renderer quirks
+		soundfont_instruments = ["piano", "acoustic_guitar", "electric_guitar_clean", "electric_guitar_jazz"]
+		if state.settings.waveform in soundfont_instruments:
 			try:
-				bytes_ = render_piano_bytes(m1, m2, state.current_question.mode, state.settings.volume)
+				bytes_ = render_instrument_bytes(m1, m2, state.current_question.mode, state.settings.volume, state.settings.waveform)
 			except Exception as e:
 				st.warning(str(e))
-				bytes_ = _cached_audio_bytes(f1, f2, state.current_question.mode, state.settings.waveform, state.play_version)
+				bytes_ = _cached_audio_bytes(f1, f2, state.current_question.mode, "sine", state.play_version)
 		else:
 			bytes_ = _cached_audio_bytes(f1, f2, state.current_question.mode, state.settings.waveform, state.play_version)
 		if state.trigger_autoplay:

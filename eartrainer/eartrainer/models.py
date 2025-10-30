@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 
 Mode = Literal["ascending", "descending", "harmonic"]
-Waveform = Literal["sine", "triangle", "saw", "piano"]
+Waveform = Literal["sine", "triangle", "saw", "piano", "acoustic_guitar", "electric_guitar_clean", "electric_guitar_jazz"]
 
 
 class Settings(BaseModel):
@@ -15,7 +15,7 @@ class Settings(BaseModel):
 	)
 	mode: Mode = Field(default="ascending")
 	range: Tuple[str, str] = Field(default=("C3", "A4"))
-	waveform: Waveform = Field(default="piano")
+	waveform: Waveform = Field(default="acoustic_guitar")
 	session_len: int = Field(default=20, ge=1, le=200)
 	volume: float = Field(default=0.9, ge=0.0, le=1.0)
 
